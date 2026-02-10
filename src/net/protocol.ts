@@ -91,5 +91,37 @@ export type ChunkEvictMsg = {
   cz: number;
 };
 
-export type ObserverMsg = TickMsg | ChunkSurfaceMsg | ChunkPatchMsg | ChunkEvictMsg;
+export type ChunkVoxelsMsg = {
+  type: "CHUNK_VOXELS";
+  protocol_version: string;
+  cx: number;
+  cz: number;
+  encoding: "PAL16_U16LE_YZX";
+  data: string;
+};
 
+export type ChunkVoxelPatchCell = { x: number; y: number; z: number; block: number };
+
+export type ChunkVoxelPatchMsg = {
+  type: "CHUNK_VOXEL_PATCH";
+  protocol_version: string;
+  cx: number;
+  cz: number;
+  cells: ChunkVoxelPatchCell[];
+};
+
+export type ChunkVoxelsEvictMsg = {
+  type: "CHUNK_VOXELS_EVICT";
+  protocol_version: string;
+  cx: number;
+  cz: number;
+};
+
+export type ObserverMsg =
+  | TickMsg
+  | ChunkSurfaceMsg
+  | ChunkPatchMsg
+  | ChunkEvictMsg
+  | ChunkVoxelsMsg
+  | ChunkVoxelPatchMsg
+  | ChunkVoxelsEvictMsg;

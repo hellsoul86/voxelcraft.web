@@ -3,6 +3,9 @@ import type {
   ChunkEvictMsg,
   ChunkPatchMsg,
   ChunkSurfaceMsg,
+  ChunkVoxelPatchMsg,
+  ChunkVoxelsEvictMsg,
+  ChunkVoxelsMsg,
   ObserverMsg,
   TickMsg,
 } from "./protocol";
@@ -36,13 +39,28 @@ async function fetchBootstrap() {
 
 function sendSubscribe() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const { chunk_radius, max_chunks } = useObserverStore.getState();
+  const {
+    chunk_radius,
+    max_chunks,
+    view_mode,
+    voxel_radius,
+    voxel_max_chunks,
+    follow_agent_id,
+    selected_agent_id,
+  } = useObserverStore.getState();
+
+  const focus_agent_id =
+    view_mode === "3D" ? (follow_agent_id ?? selected_agent_id ?? "") : "";
+  const vr = view_mode === "3D" && focus_agent_id ? voxel_radius : 0;
   ws.send(
     JSON.stringify({
       type: "SUBSCRIBE",
       protocol_version: PROTOCOL_VERSION,
       chunk_radius,
       max_chunks,
+      focus_agent_id,
+      voxel_radius: vr,
+      voxel_max_chunks,
     }),
   );
 }
@@ -61,6 +79,15 @@ function handleMsg(msg: ObserverMsg) {
       return;
     case "CHUNK_EVICT":
       st.ingest_chunk_evict(msg as ChunkEvictMsg);
+      return;
+    case "CHUNK_VOXELS":
+      st.ingest_chunk_voxels(msg as ChunkVoxelsMsg);
+      return;
+    case "CHUNK_VOXEL_PATCH":
+      st.ingest_chunk_voxel_patch(msg as ChunkVoxelPatchMsg);
+      return;
+    case "CHUNK_VOXELS_EVICT":
+      st.ingest_chunk_voxels_evict(msg as ChunkVoxelsEvictMsg);
       return;
   }
 }
@@ -115,7 +142,16 @@ export function startObserverClient() {
   stopped = false;
   if (unsubscribeCfg) unsubscribeCfg();
   unsubscribeCfg = useObserverStore.subscribe(
-    (s) => [s.chunk_radius, s.max_chunks] as const,
+    (s) =>
+      [
+        s.chunk_radius,
+        s.max_chunks,
+        s.view_mode,
+        s.voxel_radius,
+        s.voxel_max_chunks,
+        s.follow_agent_id ?? "",
+        s.selected_agent_id ?? "",
+      ].join("|"),
     () => {
       sendSubscribe();
     },
@@ -131,4 +167,3 @@ export function startObserverClient() {
     ws = null;
   };
 }
-

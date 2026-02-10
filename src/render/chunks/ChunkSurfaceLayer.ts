@@ -29,6 +29,10 @@ export class ChunkSurfaceLayer {
     this.geom = new THREE.PlaneGeometry(16, 16);
   }
 
+  setVisible(v: boolean) {
+    this.group.visible = v;
+  }
+
   upsert(surface: ChunkSurface, palette?: string[], height = 64) {
     const k = key(surface.cx, surface.cz);
     let r = this.chunks.get(k);

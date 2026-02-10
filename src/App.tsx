@@ -31,7 +31,9 @@ export function App() {
         tick: s.tick,
         agents_count: s.agents_by_id.size,
         chunks_loaded: s.chunks.size,
+        voxels_loaded: s.voxels.size,
         selected_agent_id: s.selected_agent_id ?? null,
+        view_mode: s.view_mode,
       });
     };
 
@@ -86,4 +88,3 @@ export function App() {
     </div>
   );
 }
-

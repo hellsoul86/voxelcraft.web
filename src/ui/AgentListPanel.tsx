@@ -6,9 +6,14 @@ export function AgentListPanel() {
   const agentsById = useObserverStore((s) => s.agents_by_id);
   const selected = useObserverStore((s) => s.selected_agent_id);
   const follow = useObserverStore((s) => s.follow_agent_id);
+  const viewMode = useObserverStore((s) => s.view_mode);
   const chunkRadius = useObserverStore((s) => s.chunk_radius);
   const chunksLoaded = useObserverStore((s) => s.chunks.size);
+  const voxelRadius = useObserverStore((s) => s.voxel_radius);
+  const voxelsLoaded = useObserverStore((s) => s.voxels.size);
   const setChunkRadius = useObserverStore((s) => s.set_chunk_radius);
+  const setViewMode = useObserverStore((s) => s.set_view_mode);
+  const setVoxelRadius = useObserverStore((s) => s.set_voxel_radius);
   const selectAgent = useObserverStore((s) => s.select_agent);
   const setFollow = useObserverStore((s) => s.set_follow);
 
@@ -39,6 +44,30 @@ export function AgentListPanel() {
           onChange={(e) => setQ(e.target.value)}
         />
         <div className="row">
+          <label>视图</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(["2D", "3D"] as const).map((m) => (
+              <button
+                key={m}
+                data-testid={`view-${m.toLowerCase()}`}
+                onClick={() => setViewMode(m)}
+                style={{
+                  padding: "6px 10px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(255,255,255,0.14)",
+                  background: viewMode === m ? "rgba(77,208,225,0.2)" : "rgba(0,0,0,0.2)",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  fontFamily: "var(--mono)",
+                  fontSize: 12,
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="row">
           <label>观测半径 (chunk)</label>
           <output>{chunkRadius}</output>
         </div>
@@ -53,6 +82,30 @@ export function AgentListPanel() {
           <label>已加载 chunks</label>
           <output>{chunksLoaded}</output>
         </div>
+        {viewMode === "3D" ? (
+          <>
+            <div className="row">
+              <label>3D 半径 (chunk)</label>
+              <output>{voxelRadius}</output>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={8}
+              value={voxelRadius}
+              onChange={(e) => setVoxelRadius(Number(e.target.value))}
+            />
+            <div className="row">
+              <label>已加载 voxels</label>
+              <output>{voxelsLoaded}</output>
+            </div>
+            {!follow ? (
+              <div style={{ marginTop: 10, fontSize: 12, color: "var(--muted)", fontFamily: "var(--mono)" }}>
+                提示: 3D 视图会围绕“跟随的 Agent”加载体素，请先在列表里点击一个 Agent。
+              </div>
+            ) : null}
+          </>
+        ) : null}
       </div>
 
       {selectedAgent ? (
@@ -95,6 +148,7 @@ export function AgentListPanel() {
           return (
             <div
               key={a.id}
+              data-testid={`agent-${a.id}`}
               className={`agent${sel ? " selected" : ""}`}
               onClick={() => {
                 selectAgent(a.id);

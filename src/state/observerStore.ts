@@ -7,15 +7,25 @@ import type {
   ChunkEvictMsg,
   ChunkPatchMsg,
   ChunkSurfaceMsg,
+  ChunkVoxelPatchMsg,
+  ChunkVoxelsEvictMsg,
+  ChunkVoxelsMsg,
   TickMsg,
 } from "../net/protocol";
 import { decodePAL16Y8 } from "../net/pal16y8";
+import { decodePAL16U16LEYZX } from "../net/voxels";
 
 export type ChunkSurface = {
   cx: number;
   cz: number;
   blocks: Uint16Array;
   ys: Uint8Array;
+};
+
+export type ChunkVoxels = {
+  cx: number;
+  cz: number;
+  blocks: Uint16Array;
 };
 
 export type ActivityItem = {
@@ -39,10 +49,16 @@ type ObserverStore = {
   active_event_id?: string;
   active_event_ends_tick?: number;
 
+  view_mode: "2D" | "3D";
+
   chunk_radius: number;
   max_chunks: number;
 
+  voxel_radius: number;
+  voxel_max_chunks: number;
+
   chunks: Map<string, ChunkSurface>;
+  voxels: Map<string, ChunkVoxels>;
   agents_by_id: Map<string, TickMsg["agents"][number]>;
 
   selected_agent_id?: string;
@@ -55,12 +71,17 @@ type ObserverStore = {
   set_bootstrap: (b: BootstrapResponse) => void;
   select_agent: (id?: string) => void;
   set_follow: (id?: string) => void;
+  set_view_mode: (m: "2D" | "3D") => void;
   set_chunk_radius: (r: number) => void;
+  set_voxel_radius: (r: number) => void;
 
   ingest_tick: (m: TickMsg) => void;
   ingest_chunk_surface: (m: ChunkSurfaceMsg) => void;
   ingest_chunk_patch: (m: ChunkPatchMsg) => void;
   ingest_chunk_evict: (m: ChunkEvictMsg) => void;
+  ingest_chunk_voxels: (m: ChunkVoxelsMsg) => void;
+  ingest_chunk_voxel_patch: (m: ChunkVoxelPatchMsg) => void;
+  ingest_chunk_voxels_evict: (m: ChunkVoxelsEvictMsg) => void;
 };
 
 function chunkKey(cx: number, cz: number) {
@@ -139,10 +160,16 @@ export const useObserverStore = create<ObserverStore>()(
   active_event_id: undefined,
   active_event_ends_tick: undefined,
 
+  view_mode: "2D",
+
   chunk_radius: 6,
   max_chunks: 1024,
 
+  voxel_radius: 2,
+  voxel_max_chunks: 256,
+
   chunks: new Map(),
+  voxels: new Map(),
   agents_by_id: new Map(),
 
   selected_agent_id: undefined,
@@ -167,9 +194,35 @@ export const useObserverStore = create<ObserverStore>()(
     set({ follow_agent_id: id });
   },
 
+  set_view_mode: (m) => {
+    if (m === "2D") {
+      // Drop 3D cached chunks immediately; server will also evict.
+      set({ view_mode: m, voxels: new Map() });
+      return;
+    }
+    if (m === "3D") {
+      const s = get();
+      const existing = s.follow_agent_id ?? s.selected_agent_id;
+      if (!existing) {
+        const firstOnline = [...s.agents_by_id.values()].find((a) => a.connected)?.id;
+        const fallback = firstOnline ?? [...s.agents_by_id.values()][0]?.id;
+        if (fallback) {
+          set({ view_mode: m, selected_agent_id: fallback, follow_agent_id: fallback });
+          return;
+        }
+      }
+    }
+    set({ view_mode: m });
+  },
+
   set_chunk_radius: (r) => {
     const rr = Math.max(1, Math.min(32, Math.floor(r)));
     set({ chunk_radius: rr });
+  },
+
+  set_voxel_radius: (r) => {
+    const rr = Math.max(0, Math.min(8, Math.floor(r)));
+    set({ voxel_radius: rr });
   },
 
   ingest_tick: (m) => {
@@ -209,6 +262,21 @@ export const useObserverStore = create<ObserverStore>()(
       agents.set(a.id, a);
     }
 
+    // If user switched to 3D before agents were known, auto-follow the first connected agent
+    // once we have the first full tick of agent data.
+    const st0 = get();
+    let nextSelected = st0.selected_agent_id;
+    let nextFollow = st0.follow_agent_id;
+    if (st0.view_mode === "3D" && !nextSelected && !nextFollow && agents.size > 0) {
+      const arr = [...agents.values()];
+      const firstOnline = arr.find((a) => a.connected)?.id;
+      const fallback = firstOnline ?? arr[0]?.id;
+      if (fallback) {
+        nextSelected = fallback;
+        nextFollow = fallback;
+      }
+    }
+
     // Keep recent audits for overlay (tick-based TTL).
     const ttl = 50;
     const bornTick = m.tick;
@@ -228,6 +296,8 @@ export const useObserverStore = create<ObserverStore>()(
       active_event_id: m.active_event_id,
       active_event_ends_tick: m.active_event_ends_tick,
       agents_by_id: agents,
+      selected_agent_id: nextSelected,
+      follow_agent_id: nextFollow,
       activity,
       recent_audits: nextRecent,
     });
@@ -271,6 +341,49 @@ export const useObserverStore = create<ObserverStore>()(
     const next = new Map(get().chunks);
     next.delete(key);
     set({ chunks: next });
+  },
+
+  ingest_chunk_voxels: (m) => {
+    if (m.encoding !== "PAL16_U16LE_YZX") return;
+    const height = get().bootstrap?.world_params?.height ?? 64;
+    const decoded = decodePAL16U16LEYZX(m.data, height);
+    if (!decoded) return;
+
+    const key = chunkKey(m.cx, m.cz);
+    const next = new Map(get().voxels);
+    next.set(key, { cx: m.cx, cz: m.cz, blocks: decoded });
+    set({ voxels: next });
+  },
+
+  ingest_chunk_voxel_patch: (m) => {
+    const key = chunkKey(m.cx, m.cz);
+    const prev = get().voxels.get(key);
+    if (!prev) return;
+    if (!Array.isArray(m.cells) || m.cells.length === 0) return;
+
+    const height = get().bootstrap?.world_params?.height ?? 64;
+
+    const blocks = new Uint16Array(prev.blocks);
+    for (const c of m.cells) {
+      const x = c.x | 0;
+      const y = c.y | 0;
+      const z = c.z | 0;
+      if (x < 0 || x >= 16 || z < 0 || z >= 16) continue;
+      if (y < 0 || y >= height) continue;
+      const idx = x + z * 16 + y * 16 * 16;
+      if (idx < 0 || idx >= blocks.length) continue;
+      blocks[idx] = c.block;
+    }
+    const next = new Map(get().voxels);
+    next.set(key, { cx: prev.cx, cz: prev.cz, blocks });
+    set({ voxels: next });
+  },
+
+  ingest_chunk_voxels_evict: (m) => {
+    const key = chunkKey(m.cx, m.cz);
+    const next = new Map(get().voxels);
+    next.delete(key);
+    set({ voxels: next });
   },
   })),
 );

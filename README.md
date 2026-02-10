@@ -20,6 +20,12 @@ npm run dev
 
 打开：`http://127.0.0.1:5173`
 
+## 3D 体素视图（真 3D）
+
+- 在左侧面板把视图切到 `3D`
+- 观测台会围绕“跟随的 Agent”请求并渲染 `CHUNK_VOXELS`（16x16xheight 全体素）并用 `CHUNK_VOXEL_PATCH` 增量更新
+- `3D 半径 (chunk)` 越大越吃性能，建议先从 `2` 开始
+
 ## Mock 后端（用于 E2E/开发）
 
 ```bash

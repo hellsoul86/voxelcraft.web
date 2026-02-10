@@ -1,10 +1,11 @@
 import http from "node:http";
 import { WebSocketServer } from "ws";
 
-const HOST = "127.0.0.1";
-const PORT = 8080;
+const HOST = process.env.MOCK_HOST ?? "127.0.0.1";
+const PORT = Number(process.env.MOCK_PORT ?? process.env.PORT ?? "8080");
 
 const OBS_VERSION = "0.1";
+const HEIGHT = 64;
 
 // Palette indices are the "block ids" used in CHUNK_SURFACE / CHUNK_PATCH.
 const block_palette = [
@@ -20,6 +21,10 @@ const block_palette = [
   "BRICK", // 9
   "GLASS", // 10
 ];
+
+function voxKey(cx, cz) {
+  return `${cx},${cz}`;
+}
 
 function surfaceB64(cx, cz) {
   const buf = Buffer.alloc(16 * 16 * 3);
@@ -42,6 +47,55 @@ function surfaceB64(cx, cz) {
   return buf.toString("base64");
 }
 
+const voxelsByChunk = new Map();
+
+function ensureChunkVoxels(cx, cz) {
+  const k = voxKey(cx, cz);
+  let blocks = voxelsByChunk.get(k);
+  if (blocks) return blocks;
+
+  blocks = new Uint16Array(16 * 16 * HEIGHT);
+  for (let z = 0; z < 16; z++) {
+    for (let x = 0; x < 16; x++) {
+      const wx = cx * 16 + x;
+      const wz = cz * 16 + z;
+      const yTop = 18 + ((x * 3 + z * 5 + cx * 7 + cz * 11) % 12);
+
+      for (let y = 0; y < HEIGHT; y++) {
+        let b = 0; // AIR
+        if (y <= yTop) b = y === yTop ? 2 : 4; // GRASS on top, STONE below
+        if (y > yTop && y <= 20) b = 5; // WATER up to sea level
+        const idx = x + z * 16 + y * 16 * 16;
+        blocks[idx] = b;
+      }
+    }
+  }
+
+  // A small pillar in chunk (0,0) so 3D has something vertical.
+  if (cx === 0 && cz === 0) {
+    const px = 9;
+    const pz = 9;
+    for (let y = 22; y <= 32; y++) {
+      blocks[px + pz * 16 + y * 16 * 16] = 9; // BRICK
+    }
+    blocks[px + pz * 16 + 33 * 16 * 16] = 10; // GLASS cap
+  }
+
+  voxelsByChunk.set(k, blocks);
+  return blocks;
+}
+
+function voxelsB64(cx, cz) {
+  const blocks = ensureChunkVoxels(cx, cz);
+  const buf = Buffer.alloc(blocks.length * 2);
+  for (let i = 0; i < blocks.length; i++) {
+    const v = blocks[i];
+    buf[i * 2] = v & 0xff;
+    buf[i * 2 + 1] = (v >> 8) & 0xff;
+  }
+  return buf.toString("base64");
+}
+
 function json(res, code, body) {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
@@ -56,7 +110,7 @@ const server = http.createServer((req, res) => {
       world_params: {
         tick_rate_hz: 5,
         chunk_size: [16, 16, 64],
-        height: 64,
+        height: HEIGHT,
         seed: 1337,
         boundary_r: 4000,
       },
@@ -79,6 +133,7 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws) => {
   let tick = 1;
   let timer = null;
+  let voxelsEnabled = false;
 
   const send = (obj) => {
     try {
@@ -94,6 +149,12 @@ wss.on("connection", (ws) => {
     send({ type: "CHUNK_SURFACE", protocol_version: OBS_VERSION, cx: 1, cz: 0, encoding: "PAL16_Y8", data: surfaceB64(1, 0) });
     send({ type: "CHUNK_SURFACE", protocol_version: OBS_VERSION, cx: -1, cz: 0, encoding: "PAL16_Y8", data: surfaceB64(-1, 0) });
 
+    if (voxelsEnabled) {
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: 0, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(0, 0) });
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: 1, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(1, 0) });
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: -1, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(-1, 0) });
+    }
+
     timer = setInterval(() => {
       tick++;
 
@@ -104,6 +165,7 @@ wss.on("connection", (ws) => {
 
       const audits = [];
       const patches = [];
+      const voxelPatches = [];
 
       // Every few ticks, flip one surface cell between GRASS and WATER.
       if (tick % 4 === 0) {
@@ -111,6 +173,12 @@ wss.on("connection", (ws) => {
         const z = 9;
         const block = tick % 8 === 0 ? 2 : 5; // GRASS/WATER
         patches.push({ x, z, block, y: 22 });
+        voxelPatches.push({ x, y: 22, z, block });
+
+        // Keep voxel state consistent for the chunk (0,0).
+        const blocks = ensureChunkVoxels(0, 0);
+        const idx = x + z * 16 + 22 * 16 * 16;
+        blocks[idx] = block;
         audits.push({
           tick,
           actor: "A01",
@@ -129,6 +197,15 @@ wss.on("connection", (ws) => {
           cx: 0,
           cz: 0,
           cells: patches,
+        });
+      }
+      if (voxelsEnabled && voxelPatches.length) {
+        send({
+          type: "CHUNK_VOXEL_PATCH",
+          protocol_version: OBS_VERSION,
+          cx: 0,
+          cz: 0,
+          cells: voxelPatches,
         });
       }
 
@@ -205,9 +282,19 @@ wss.on("connection", (ws) => {
       return;
     }
     if (!msg || msg.type !== "SUBSCRIBE" || msg.protocol_version !== OBS_VERSION) return;
+    // Enable voxels when requested by client.
+    const vr = Number(msg.voxel_radius ?? 0);
+    voxelsEnabled = Number.isFinite(vr) && vr > 0;
     subscribed = true;
     clearTimeout(subTimer);
     if (!timer) start();
+
+    // If the client toggles voxels after start, push current chunks immediately.
+    if (timer && voxelsEnabled) {
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: 0, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(0, 0) });
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: 1, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(1, 0) });
+      send({ type: "CHUNK_VOXELS", protocol_version: OBS_VERSION, cx: -1, cz: 0, encoding: "PAL16_U16LE_YZX", data: voxelsB64(-1, 0) });
+    }
   });
 
   ws.on("close", () => {
@@ -220,4 +307,3 @@ wss.on("connection", (ws) => {
 server.listen(PORT, HOST, () => {
   console.log(`[mock] listening on http://${HOST}:${PORT}`);
 });
-

@@ -17,6 +17,10 @@ export class RecentChanges {
     this.geom = new THREE.PlaneGeometry(1, 1);
   }
 
+  setVisible(v: boolean) {
+    this.group.visible = v;
+  }
+
   setAudits(audits: RecentAudit[], nowTick: number, ttlTicks = 50) {
     // Simple rebuild (small N); keep code obvious.
     while (this.group.children.length) {
@@ -57,4 +61,3 @@ export class RecentChanges {
     this.geom.dispose();
   }
 }
-

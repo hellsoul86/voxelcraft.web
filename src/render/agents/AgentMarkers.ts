@@ -41,7 +41,7 @@ export class AgentMarkers {
     this.scene.add(this.group);
   }
 
-  setAgents(agents: AgentState[], selectedId?: string) {
+  setAgents(agents: AgentState[], selectedId?: string, yMode: "flat" | "world" = "flat") {
     const next = new Set<string>();
     for (const a of agents) {
       next.add(a.id);
@@ -51,7 +51,7 @@ export class AgentMarkers {
         this.renders.set(a.id, r);
         this.group.add(r.group);
       }
-      this.update(r, a, selectedId);
+      this.update(r, a, selectedId, yMode);
     }
 
     for (const [id, r] of this.renders) {
@@ -99,9 +99,10 @@ export class AgentMarkers {
     return { group, disc, ring, dir, baseColor };
   }
 
-  private update(r: AgentRender, a: AgentState, selectedId?: string) {
-    const [x, _y, z] = a.pos;
-    r.group.position.set(x + 0.5, 0, z + 0.5);
+  private update(r: AgentRender, a: AgentState, selectedId?: string, yMode: "flat" | "world" = "flat") {
+    const [x, y, z] = a.pos;
+    const yy = yMode === "world" ? y : 0;
+    r.group.position.set(x + 0.5, yy, z + 0.5);
 
     const selected = selectedId === a.id;
     r.ring.visible = selected;
@@ -114,4 +115,3 @@ export class AgentMarkers {
     r.dir.rotation.y = yawRad;
   }
 }
-
