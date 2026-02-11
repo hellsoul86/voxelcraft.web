@@ -5,7 +5,7 @@ const HOST = process.env.MOCK_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.MOCK_PORT ?? process.env.PORT ?? "8080");
 
 const OBS_VERSION = "0.1";
-const HEIGHT = 64;
+const HEIGHT = Number(process.env.MOCK_HEIGHT ?? "1");
 
 // Palette indices are the "block ids" used in CHUNK_SURFACE / CHUNK_PATCH.
 const block_palette = [
@@ -37,7 +37,7 @@ function surfaceB64(cx, cz) {
       let block = (x + z + cx + cz) % 2 === 0 ? 2 : 3; // GRASS/SAND
       if (x === 7 || x === 8) block = 5; // WATER stripe
 
-      const y = 18 + ((x * 3 + z * 5 + cx * 7 + cz * 11) % 12);
+      const y = HEIGHT <= 1 ? 0 : 18 + ((x * 3 + z * 5 + cx * 7 + cz * 11) % 12);
 
       buf[off] = block & 0xff;
       buf[off + 1] = (block >> 8) & 0xff;
@@ -57,10 +57,15 @@ function ensureChunkVoxels(cx, cz) {
   blocks = new Uint16Array(16 * 16 * HEIGHT);
   for (let z = 0; z < 16; z++) {
     for (let x = 0; x < 16; x++) {
-      const wx = cx * 16 + x;
-      const wz = cz * 16 + z;
-      const yTop = 18 + ((x * 3 + z * 5 + cx * 7 + cz * 11) % 12);
+      if (HEIGHT <= 1) {
+        // Mirror CHUNK_SURFACE's 2D pattern on the single y=0 layer.
+        let block = (x + z + cx + cz) % 2 === 0 ? 2 : 3; // GRASS/SAND
+        if (x === 7 || x === 8) block = 5; // WATER stripe
+        blocks[x + z * 16] = block;
+        continue;
+      }
 
+      const yTop = 18 + ((x * 3 + z * 5 + cx * 7 + cz * 11) % 12);
       for (let y = 0; y < HEIGHT; y++) {
         let b = 0; // AIR
         if (y <= yTop) b = y === yTop ? 2 : 4; // GRASS on top, STONE below
@@ -71,8 +76,8 @@ function ensureChunkVoxels(cx, cz) {
     }
   }
 
-  // A small pillar in chunk (0,0) so 3D has something vertical.
-  if (cx === 0 && cz === 0) {
+  // A small pillar in chunk (0,0) so 3D has something vertical (only if height allows it).
+  if (HEIGHT > 34 && cx === 0 && cz === 0) {
     const px = 9;
     const pz = 9;
     for (let y = 22; y <= 32; y++) {
@@ -109,7 +114,7 @@ const server = http.createServer((req, res) => {
       tick: 1,
       world_params: {
         tick_rate_hz: 5,
-        chunk_size: [16, 16, 64],
+        chunk_size: [16, 16, HEIGHT],
         height: HEIGHT,
         seed: 1337,
         boundary_r: 4000,
@@ -172,18 +177,19 @@ wss.on("connection", (ws) => {
         const x = 9;
         const z = 9;
         const block = tick % 8 === 0 ? 2 : 5; // GRASS/WATER
-        patches.push({ x, z, block, y: 22 });
-        voxelPatches.push({ x, y: 22, z, block });
+        const y = HEIGHT <= 1 ? 0 : 22;
+        patches.push({ x, z, block, y });
+        voxelPatches.push({ x, y, z, block });
 
         // Keep voxel state consistent for the chunk (0,0).
         const blocks = ensureChunkVoxels(0, 0);
-        const idx = x + z * 16 + 22 * 16 * 16;
+        const idx = HEIGHT <= 1 ? x + z * 16 : x + z * 16 + 22 * 16 * 16;
         blocks[idx] = block;
         audits.push({
           tick,
           actor: "A01",
           action: "SET_BLOCK",
-          pos: [x, 22, z],
+          pos: [x, HEIGHT <= 1 ? 0 : 22, z],
           from: block === 5 ? 2 : 5,
           to: block,
           reason: "BUILD_BLUEPRINT",
