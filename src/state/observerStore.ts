@@ -12,6 +12,7 @@ import type {
   ChunkVoxelsMsg,
   TickMsg,
 } from "../net/protocol";
+import { inferTeamRole } from "../net/agentRole";
 import { decodePAL16Y8 } from "../net/pal16y8";
 import { decodePAL16U16LEYZX } from "../net/voxels";
 
@@ -259,7 +260,7 @@ export const useObserverStore = create<ObserverStore>()(
 
     const agents = new Map<string, TickMsg["agents"][number]>();
     for (const a of m.agents ?? []) {
-      agents.set(a.id, a);
+      agents.set(a.id, { ...a, role: inferTeamRole(a) });
     }
 
     // If user switched to 3D before agents were known, auto-follow the first connected agent

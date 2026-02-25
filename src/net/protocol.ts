@@ -27,6 +27,7 @@ export type AgentState = {
   name: string;
   connected: boolean;
   org_id?: string;
+  role?: string;
   pos: [number, number, number];
   yaw: number;
   hp: number;

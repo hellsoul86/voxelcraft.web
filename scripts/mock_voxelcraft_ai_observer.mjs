@@ -227,6 +227,7 @@ wss.on("connection", (ws) => {
           {
             id: "A01",
             name: "bot1",
+            role: "backend",
             connected: true,
             org_id: "",
             pos: [a1x, 22, a1z],
@@ -240,6 +241,7 @@ wss.on("connection", (ws) => {
           {
             id: "A02",
             name: "bot2",
+            role: "frontend",
             connected: true,
             org_id: "",
             pos: [a2x, 22, a2z],

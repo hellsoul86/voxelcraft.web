@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 
+import { normalizeTeamRole, roleLabel } from "../net/agentRole";
 import { useObserverStore } from "../state/observerStore";
 
 export function AgentListPanel() {
@@ -118,6 +119,9 @@ export function AgentListPanel() {
             坐标: {selectedAgent.pos[0]},{selectedAgent.pos[1]},{selectedAgent.pos[2]}
           </div>
           <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 12, color: "var(--muted)" }}>
+            角色: {roleLabel(normalizeTeamRole(selectedAgent.role) ?? "unknown")}
+          </div>
+          <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 12, color: "var(--muted)" }}>
             任务: move={selectedAgent.move_task?.kind ?? "-"} | work={selectedAgent.work_task?.kind ?? "-"}
           </div>
           <div style={{ marginTop: 8, fontFamily: "var(--mono)", fontSize: 12, color: "var(--muted)" }}>
@@ -159,6 +163,19 @@ export function AgentListPanel() {
               <div className="meta">
                 <div className="name">
                   {a.name}
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      padding: "1px 6px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.15)",
+                      fontSize: 10,
+                      color: "var(--muted)",
+                      fontFamily: "var(--mono)",
+                    }}
+                  >
+                    {roleLabel(normalizeTeamRole(a.role) ?? "unknown")}
+                  </span>
                   {!a.connected ? <span style={{ color: "var(--muted)" }}>（离线）</span> : null}
                 </div>
                 <div className="id">{a.id}</div>
